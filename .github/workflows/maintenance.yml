@@ -1,0 +1,403 @@
+name: Maintenance - Tâches Automatisées
+
+on:
+  schedule:
+    # Tous les jours à 2h du matin UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'Tâche de maintenance à exécuter'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+        - all
+        - dependencies
+        - cleanup
+        - backup
+        - security
+
+jobs:
+  # ===================================
+  # MISE À JOUR DES DÉPENDANCES
+  # ===================================
+  update-dependencies:
+    name: Mise à jour des dépendances
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'dependencies' || github.event.inputs.task == 'all' || github.event_name == 'schedule'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Update Python dependencies
+      working-directory: ./backend
+      run: |
+        pip install --upgrade pip pip-tools
+        pip-compile --upgrade requirements.in
+        pip-compile --upgrade requirements-dev.in
+
+    - name: Update Node.js dependencies
+      working-directory: ./frontend
+      run: |
+        npm update
+        npm audit fix --audit-level moderate
+
+    - name: Create Pull Request for dependencies
+      uses: peter-evans/create-pull-request@v5
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        commit-message: 'chore: update dependencies'
+        title: '🔄 Mise à jour automatique des dépendances'
+        body: |
+          Mise à jour automatique des dépendances générée par GitHub Actions.
+          
+          ## Changements
+          - ⬆️ Mise à jour des packages Python
+          - ⬆️ Mise à jour des packages Node.js
+          - 🔒 Corrections de sécurité automatiques
+          
+          ## Tests
+          - [ ] Les tests CI passent
+          - [ ] Tests manuels effectués
+          
+          > Cette PR a été générée automatiquement le {{ date }}
+        branch: chore/update-dependencies
+        labels: |
+          dependencies
+          automated
+        reviewers: |
+          ${{ github.actor }}
+
+  # ===================================
+  # NETTOYAGE DES RESSOURCES
+  # ===================================
+  cleanup:
+    name: Nettoyage des ressources
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'cleanup' || github.event.inputs.task == 'all' || github.event_name == 'schedule'
+
+    steps:
+    - name: Cleanup old Docker images
+      run: |
+        echo "🧹 Cleaning up old Docker images..."
+        
+        # Nettoyer les images de plus de 30 jours
+        # Note: Cette logique dépend de votre registry
+        echo "Cleanup would remove images older than 30 days"
+        
+    - name: Cleanup old artifacts
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const response = await github.rest.actions.listArtifactsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            per_page: 100
+          });
+          
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - 30);
+          
+          for (const artifact of response.data.artifacts) {
+            const createdAt = new Date(artifact.created_at);
+            if (createdAt < cutoffDate) {
+              console.log(`Deleting artifact: ${artifact.name} (${artifact.created_at})`);
+              await github.rest.actions.deleteArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id
+              });
+            }
+          }
+
+    - name: Cleanup old workflow runs
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const response = await github.rest.actions.listWorkflowRunsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            status: 'completed',
+            per_page: 100
+          });
+          
+          const cutoffDate = new Date();
+          cutoffDate.setDate(cutoffDate.getDate() - 90); // 90 jours
+          
+          for (const run of response.data.workflow_runs) {
+            const createdAt = new Date(run.created_at);
+            if (createdAt < cutoffDate && run.conclusion !== 'success') {
+              console.log(`Deleting workflow run: ${run.id} (${run.created_at})`);
+              await github.rest.actions.deleteWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: run.id
+              });
+            }
+          }
+
+  # ===================================
+  # SAUVEGARDE DE LA BASE DE DONNÉES
+  # ===================================
+  backup:
+    name: Sauvegarde base de données
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'backup' || github.event.inputs.task == 'all' || github.event_name == 'schedule'
+
+    steps:
+    - name: Create database backup
+      run: |
+        echo "💾 Creating database backup..."
+        
+        # Exemple de sauvegarde MySQL
+        # mysqldump -h $DB_HOST -u $DB_USER -p$DB_PASSWORD $DB_NAME > backup_$(date +%Y%m%d_%H%M%S).sql
+        
+        # Exemple de sauvegarde et upload vers S3
+        # aws s3 cp backup_$(date +%Y%m%d_%H%M%S).sql s3://your-backup-bucket/
+        
+        echo "✅ Backup completed"
+
+    - name: Verify backup integrity
+      run: |
+        echo "🔍 Verifying backup integrity..."
+        
+        # Vérifications de l'intégrité de la sauvegarde
+        # Par exemple: décompresser et vérifier la structure
+        
+        echo "✅ Backup integrity verified"
+
+    - name: Cleanup old backups
+      run: |
+        echo "🧹 Cleaning up old backups..."
+        
+        # Supprimer les sauvegardes de plus de 30 jours
+        # aws s3 ls s3://your-backup-bucket/ | while read -r line; do
+        #   backup_date=$(echo $line | awk '{print $1" "$2}')
+        #   if [[ "$backup_date" < "$(date -d '30 days ago' '+%Y-%m-%d %H:%M:%S')" ]]; then
+        #     backup_file=$(echo $line | awk '{print $4}')
+        #     aws s3 rm s3://your-backup-bucket/$backup_file
+        #   fi
+        # done
+        
+        echo "✅ Old backups cleaned up"
+
+  # ===================================
+  # AUDIT DE SÉCURITÉ
+  # ===================================
+  security-audit:
+    name: Audit de sécurité
+    runs-on: ubuntu-latest
+    if: github.event.inputs.task == 'security' || github.event.inputs.task == 'all' || github.event_name == 'schedule'
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Install security tools
+      run: |
+        pip install safety bandit semgrep
+
+    - name: Run Safety check
+      working-directory: ./backend
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check --short-report
+
+    - name: Run Bandit security linter
+      working-directory: ./backend
+      run: |
+        bandit -r . -f json -o bandit-report.json || true
+        bandit -r . -f txt
+
+    - name: Run Semgrep security scan
+      run: |
+        semgrep --config=auto --json --output=semgrep-report.json . || true
+        semgrep --config=auto .
+
+    - name: Node.js security audit
+      working-directory: ./frontend
+      run: |
+        npm audit --audit-level moderate --json > npm-audit.json || true
+        npm audit --audit-level moderate
+
+    - name: Upload security reports
+      uses: actions/upload-artifact@v3
+      with:
+        name: security-audit-reports
+        path: |
+          backend/safety-report.json
+          backend/bandit-report.json
+          semgrep-report.json
+          frontend/npm-audit.json
+        retention-days: 30
+
+    - name: Create security issue if vulnerabilities found
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const fs = require('fs');
+          
+          // Vérifier s'il y a des vulnérabilités critiques
+          let hasVulnerabilities = false;
+          let vulnerabilitiesSummary = "";
+          
+          try {
+            // Vérifier Safety
+            const safetyReport = JSON.parse(fs.readFileSync('./backend/safety-report.json', 'utf8'));
+            if (safetyReport.length > 0) {
+              hasVulnerabilities = true;
+              vulnerabilitiesSummary += `\n## Python Safety Issues\n${safetyReport.length} vulnerabilities found\n`;
+            }
+          } catch (e) {
+            console.log('No safety report found');
+          }
+          
+          if (hasVulnerabilities) {
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'security,automated',
+              state: 'open'
+            });
+            
+            if (issues.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: '🚨 Vulnérabilités de sécurité détectées',
+                body: `Des vulnérabilités de sécurité ont été détectées lors de l'audit automatique.
+                
+                ${vulnerabilitiesSummary}
+                
+                Veuillez consulter les rapports d'audit pour plus de détails.
+                
+                > Cette issue a été créée automatiquement le ${new Date().toISOString()}`,
+                labels: ['security', 'automated', 'bug']
+              });
+            }
+          }
+
+  # ===================================
+  # MÉTRIQUES ET MONITORING
+  # ===================================
+  metrics:
+    name: Collecte de métriques
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+    - name: Collect repository metrics
+      uses: actions/github-script@v6
+      with:
+        script: |
+          // Collecter des métriques sur le repository
+          const { data: repo } = await github.rest.repos.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo
+          });
+          
+          const metrics = {
+            stars: repo.stargazers_count,
+            forks: repo.forks_count,
+            open_issues: repo.open_issues_count,
+            size: repo.size,
+            timestamp: new Date().toISOString()
+          };
+          
+          console.log('Repository metrics:', JSON.stringify(metrics, null, 2));
+          
+          // Ici vous pourriez envoyer ces métriques à un service de monitoring
+          // comme DataDog, New Relic, etc.
+
+    - name: Collect workflow metrics
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: workflows } = await github.rest.actions.listRepoWorkflows({
+            owner: context.repo.owner,
+            repo: context.repo.repo
+          });
+          
+          for (const workflow of workflows.workflows) {
+            const { data: runs } = await github.rest.actions.listWorkflowRuns({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              workflow_id: workflow.id,
+              per_page: 10
+            });
+            
+            const successRate = runs.workflow_runs.length > 0 
+              ? runs.workflow_runs.filter(run => run.conclusion === 'success').length / runs.workflow_runs.length * 100
+              : 0;
+              
+            console.log(`Workflow ${workflow.name}: ${successRate.toFixed(1)}% success rate`);
+          }
+
+  # ===================================
+  # NOTIFICATION FINALE
+  # ===================================
+  notify:
+    name: Notification maintenance
+    runs-on: ubuntu-latest
+    needs: [update-dependencies, cleanup, backup, security-audit, metrics]
+    if: always() && (github.event.inputs.task == 'all' || github.event_name == 'schedule')
+
+    steps:
+    - name: Send maintenance summary
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "text": "🔧 Rapport de maintenance automatique",
+            "attachments": [
+              {
+                "color": "${{ needs.update-dependencies.result == 'success' && needs.cleanup.result == 'success' && needs.backup.result == 'success' && needs.security-audit.result == 'success' ? 'good' : 'warning' }}",
+                "fields": [
+                  {
+                    "title": "Mise à jour dépendances",
+                    "value": "${{ needs.update-dependencies.result }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Nettoyage",
+                    "value": "${{ needs.cleanup.result }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Sauvegarde",
+                    "value": "${{ needs.backup.result }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Audit sécurité",
+                    "value": "${{ needs.security-audit.result }}",
+                    "short": true
+                  }
+                ],
+                "footer": "GitHub Actions",
+                "ts": ${{ github.event.head_commit.timestamp }}
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

@@ -15,8 +15,10 @@ from models.job_offer import JobOffer
 from models.keyword import Keyword
 from models.scraping_job import ScrapingJob
 from models.job_offer_keyword import JobOfferKeyword
+from models.user import User
 from services.nlp_analyzer import nlp_analyzer
 from services.search_service import search_service
+from api.auth import router as auth_router
 
 # Configuration
 app = FastAPI(
@@ -35,6 +37,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Inclure les routeurs d'authentification
+app.include_router(auth_router)
 
 # Initialiser la base de données au démarrage
 @app.on_event("startup")

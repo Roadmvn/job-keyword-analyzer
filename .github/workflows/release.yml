@@ -1,0 +1,396 @@
+name: Release - Publication Automatique
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.2.3)'
+        required: true
+        type: string
+
+jobs:
+  # ===================================
+  # VALIDATION PRÉ-RELEASE
+  # ===================================
+  pre-release-validation:
+    name: Validation pré-release
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Récupérer tout l'historique pour les changelogs
+
+    - name: Validate tag format
+      run: |
+        if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "✅ Valid semantic version tag"
+        else
+          echo "❌ Invalid tag format. Use semantic versioning (v1.2.3)"
+          exit 1
+        fi
+
+    - name: Check if tag matches package.json version
+      working-directory: ./frontend
+      run: |
+        PACKAGE_VERSION=$(node -p "require('./package.json').version")
+        TAG_VERSION="${{ github.ref_name }}"
+        TAG_VERSION_CLEAN="${TAG_VERSION#v}"
+        
+        if [[ "$PACKAGE_VERSION" == "$TAG_VERSION_CLEAN" ]]; then
+          echo "✅ Package.json version matches tag"
+        else
+          echo "❌ Version mismatch: package.json=$PACKAGE_VERSION, tag=$TAG_VERSION_CLEAN"
+          exit 1
+        fi
+
+    - name: Run final tests
+      uses: ./.github/workflows/ci.yml
+
+  # ===================================
+  # GÉNÉRATION DU CHANGELOG
+  # ===================================
+  generate-changelog:
+    name: Génération du changelog
+    runs-on: ubuntu-latest
+    needs: pre-release-validation
+
+    outputs:
+      changelog: ${{ steps.changelog.outputs.changelog }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Récupérer le tag précédent
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        CURRENT_TAG="${{ github.ref_name }}"
+        
+        echo "Generating changelog from $PREVIOUS_TAG to $CURRENT_TAG"
+        
+        # Générer le changelog
+        CHANGELOG="## Changelog for $CURRENT_TAG\n\n"
+        
+        if [[ -n "$PREVIOUS_TAG" ]]; then
+          # Commits depuis le dernier tag
+          CHANGELOG+="### Changes since $PREVIOUS_TAG\n\n"
+          
+          # Features
+          FEATURES=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD --grep="feat:" --grep="feature:")
+          if [[ -n "$FEATURES" ]]; then
+            CHANGELOG+="#### 🚀 Features\n$FEATURES\n\n"
+          fi
+          
+          # Bug fixes
+          FIXES=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD --grep="fix:" --grep="bug:")
+          if [[ -n "$FIXES" ]]; then
+            CHANGELOG+="#### 🐛 Bug Fixes\n$FIXES\n\n"
+          fi
+          
+          # Breaking changes
+          BREAKING=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD --grep="BREAKING CHANGE")
+          if [[ -n "$BREAKING" ]]; then
+            CHANGELOG+="#### ⚠️ Breaking Changes\n$BREAKING\n\n"
+          fi
+          
+          # Other changes
+          OTHER=$(git log --pretty=format:"- %s" $PREVIOUS_TAG..HEAD --invert-grep --grep="feat:" --grep="fix:" --grep="BREAKING CHANGE")
+          if [[ -n "$OTHER" ]]; then
+            CHANGELOG+="#### 🔧 Other Changes\n$OTHER\n\n"
+          fi
+        else
+          CHANGELOG+="🎉 Initial release\n\n"
+        fi
+        
+        # Contributors
+        CONTRIBUTORS=$(git log --pretty=format:"%an" $PREVIOUS_TAG..HEAD | sort | uniq | tr '\n' ', ' | sed 's/, $//')
+        if [[ -n "$CONTRIBUTORS" ]]; then
+          CHANGELOG+="#### 👥 Contributors\n$CONTRIBUTORS\n\n"
+        fi
+        
+        # Sauvegarder le changelog
+        echo "$CHANGELOG" > RELEASE_CHANGELOG.md
+        
+        # Output pour les autres jobs
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Upload changelog
+      uses: actions/upload-artifact@v3
+      with:
+        name: changelog
+        path: RELEASE_CHANGELOG.md
+
+  # ===================================
+  # BUILD DES ASSETS DE RELEASE
+  # ===================================
+  build-release-assets:
+    name: Build assets de release
+    runs-on: ubuntu-latest
+    needs: pre-release-validation
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Build backend package
+      working-directory: ./backend
+      run: |
+        pip install build
+        python -m build
+        
+        # Créer un archive des sources
+        tar -czf job-analyzer-backend-${{ github.ref_name }}.tar.gz \
+          --exclude='__pycache__' \
+          --exclude='*.pyc' \
+          --exclude='.pytest_cache' \
+          --exclude='htmlcov' \
+          .
+
+    - name: Build frontend package
+      working-directory: ./frontend
+      run: |
+        npm ci
+        npm run build
+        
+        # Créer un archive du build
+        tar -czf job-analyzer-frontend-${{ github.ref_name }}.tar.gz -C dist .
+
+    - name: Build Docker images
+      run: |
+        # Build des images avec tag de version
+        docker build -t job-analyzer-backend:${{ github.ref_name }} ./backend
+        docker build -t job-analyzer-frontend:${{ github.ref_name }} ./frontend
+        
+        # Sauvegarder les images
+        docker save job-analyzer-backend:${{ github.ref_name }} | gzip > job-analyzer-backend-${{ github.ref_name }}.tar.gz
+        docker save job-analyzer-frontend:${{ github.ref_name }} | gzip > job-analyzer-frontend-${{ github.ref_name }}.tar.gz
+
+    - name: Generate checksums
+      run: |
+        sha256sum *.tar.gz > checksums.txt
+        cat checksums.txt
+
+    - name: Upload release assets
+      uses: actions/upload-artifact@v3
+      with:
+        name: release-assets
+        path: |
+          *.tar.gz
+          checksums.txt
+          backend/dist/
+
+  # ===================================
+  # CRÉATION DE LA RELEASE GITHUB
+  # ===================================
+  create-github-release:
+    name: Création release GitHub
+    runs-on: ubuntu-latest
+    needs: [generate-changelog, build-release-assets]
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download release assets
+      uses: actions/download-artifact@v3
+      with:
+        name: release-assets
+        path: ./release-assets
+
+    - name: Download changelog
+      uses: actions/download-artifact@v3
+      with:
+        name: changelog
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.ref_name }}
+        name: Release ${{ github.ref_name }}
+        body_path: RELEASE_CHANGELOG.md
+        draft: false
+        prerelease: ${{ contains(github.ref_name, '-alpha') || contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+        files: |
+          release-assets/*.tar.gz
+          release-assets/checksums.txt
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+  # ===================================
+  # PUBLICATION SUR LES REGISTRIES
+  # ===================================
+  publish-packages:
+    name: Publication des packages
+    runs-on: ubuntu-latest
+    needs: create-github-release
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Log in to GitHub Container Registry
+      uses: docker/login-action@v3
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Build and push backend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./backend
+        file: ./backend/Dockerfile.prod
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}-backend:${{ github.ref_name }}
+          ghcr.io/${{ github.repository }}-backend:latest
+        labels: |
+          org.opencontainers.image.title=Job Analyzer Backend
+          org.opencontainers.image.description=Backend API for Job Keywords Analyzer
+          org.opencontainers.image.version=${{ github.ref_name }}
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+    - name: Build and push frontend image
+      uses: docker/build-push-action@v5
+      with:
+        context: ./frontend
+        file: ./frontend/Dockerfile.prod
+        push: true
+        tags: |
+          ghcr.io/${{ github.repository }}-frontend:${{ github.ref_name }}
+          ghcr.io/${{ github.repository }}-frontend:latest
+        labels: |
+          org.opencontainers.image.title=Job Analyzer Frontend
+          org.opencontainers.image.description=Frontend web app for Job Keywords Analyzer
+          org.opencontainers.image.version=${{ github.ref_name }}
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+
+    - name: Publish to PyPI (if applicable)
+      working-directory: ./backend
+      env:
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: |
+        if [[ -n "$TWINE_PASSWORD" ]]; then
+          pip install twine
+          python -m build
+          twine upload dist/*
+        else
+          echo "PyPI token not configured, skipping PyPI publication"
+        fi
+
+    - name: Publish to NPM (if applicable)
+      working-directory: ./frontend
+      env:
+        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      run: |
+        if [[ -n "$NODE_AUTH_TOKEN" ]]; then
+          echo "//registry.npmjs.org/:_authToken=$NODE_AUTH_TOKEN" > ~/.npmrc
+          npm publish
+        else
+          echo "NPM token not configured, skipping NPM publication"
+        fi
+
+  # ===================================
+  # DÉPLOIEMENT AUTOMATIQUE
+  # ===================================
+  auto-deploy:
+    name: Déploiement automatique
+    runs-on: ubuntu-latest
+    needs: publish-packages
+    if: "!contains(github.ref_name, '-alpha') && !contains(github.ref_name, '-beta')"
+
+    steps:
+    - name: Trigger production deployment
+      uses: actions/github-script@v6
+      with:
+        script: |
+          await github.rest.actions.createWorkflowDispatch({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            workflow_id: 'cd.yml',
+            ref: 'main',
+            inputs: {
+              environment: 'production'
+            }
+          });
+
+  # ===================================
+  # NOTIFICATIONS
+  # ===================================
+  notify-release:
+    name: Notifications release
+    runs-on: ubuntu-latest
+    needs: [create-github-release, publish-packages]
+    if: always()
+
+    steps:
+    - name: Notify on Slack
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "text": "🚀 Nouvelle release disponible !",
+            "attachments": [
+              {
+                "color": "${{ needs.create-github-release.result == 'success' && needs.publish-packages.result == 'success' ? 'good' : 'danger' }}",
+                "fields": [
+                  {
+                    "title": "Version",
+                    "value": "${{ github.ref_name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Status",
+                    "value": "${{ needs.create-github-release.result == 'success' && needs.publish-packages.result == 'success' ? '✅ Succès' : '❌ Échec' }}",
+                    "short": true
+                  },
+                  {
+                    "title": "Release Notes",
+                    "value": "<${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ github.ref_name }}|Voir les notes de version>",
+                    "short": false
+                  }
+                ]
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+    - name: Update documentation
+      uses: actions/github-script@v6
+      if: needs.create-github-release.result == 'success'
+      with:
+        script: |
+          // Déclencher la mise à jour de la documentation
+          console.log("Triggering documentation update for version ${{ github.ref_name }}");
+          
+          // Vous pourriez déclencher un autre workflow ou appeler une API
+          // pour mettre à jour la documentation

@@ -1,0 +1,1 @@
+# Module core - Configuration et utilitaires centraux
