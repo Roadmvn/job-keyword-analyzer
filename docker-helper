@@ -1,7 +1,0 @@
-#!/bin/bash
-
-# Raccourci pour lancer le Docker Helper
-# Usage: ./docker-helper
-
-echo "🐳 Lancement du Docker Helper..."
-exec ./scripts/docker-helper.sh "$@" 

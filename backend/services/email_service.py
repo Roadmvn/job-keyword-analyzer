@@ -6,9 +6,9 @@ Gestion des emails de vérification, notifications, etc.
 import asyncio
 from typing import List, Optional, Dict, Any
 from pathlib import Path
-from email.mime.text import MimeText
-from email.mime.multipart import MimeMultipart
-from email.mime.base import MimeBase
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
 from email import encoders
 import smtplib
 import ssl
@@ -116,7 +116,7 @@ class EmailService:
             from_name = from_name or settings.EMAIL_FROM_NAME
             
             # Créer le message
-            msg = MimeMultipart('alternative')
+            msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
             msg['From'] = f"{from_name} <{from_email}>"
             msg['To'] = to_email
@@ -126,11 +126,11 @@ class EmailService:
             
             # Ajouter le contenu texte
             if text_content:
-                text_part = MimeText(text_content, 'plain', 'utf-8')
+                text_part = MIMEText(text_content, 'plain', 'utf-8')
                 msg.attach(text_part)
             
             # Ajouter le contenu HTML
-            html_part = MimeText(html_content, 'html', 'utf-8')
+            html_part = MIMEText(html_content, 'html', 'utf-8')
             msg.attach(html_part)
             
             # Ajouter les pièces jointes
@@ -156,18 +156,18 @@ class EmailService:
             logger.error(f"Erreur envoi email {subject} -> {to_email}: {e}")
             return False
     
-    def _add_attachment(self, msg: MimeMultipart, attachment: Dict[str, Any]):
+    def _add_attachment(self, msg: MIMEMultipart, attachment: Dict[str, Any]):
         """Ajouter une pièce jointe au message"""
         try:
             if 'content' in attachment:
                 # Contenu en mémoire
-                part = MimeBase('application', 'octet-stream')
+                part = MIMEBase('application', 'octet-stream')
                 part.set_payload(attachment['content'])
                 encoders.encode_base64(part)
             elif 'filepath' in attachment:
                 # Fichier sur disque
                 with open(attachment['filepath'], 'rb') as f:
-                    part = MimeBase('application', 'octet-stream')
+                    part = MIMEBase('application', 'octet-stream')
                     part.set_payload(f.read())
                     encoders.encode_base64(part)
             else:

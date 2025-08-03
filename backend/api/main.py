@@ -16,8 +16,13 @@ from models.keyword import Keyword
 from models.scraping_job import ScrapingJob
 from models.job_offer_keyword import JobOfferKeyword
 from models.user import User
-from services.nlp_analyzer import nlp_analyzer
-from services.search_service import search_service
+try:
+    from services.nlp_analyzer import nlp_analyzer
+    from services.search_service import search_service
+except ImportError:
+    # Services optionnels pour les tests
+    nlp_analyzer = None
+    search_service = None
 from api.auth import router as auth_router
 
 # Configuration
