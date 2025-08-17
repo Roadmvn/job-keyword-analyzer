@@ -74,11 +74,47 @@ class SimpleScraper:
     
     async def scrape_indeed_sample(self, query: str = "développeur", location: str = "France") -> List[JobData]:
         """
-        Scraper Indeed simplifié avec données de test réalistes
-        En mode développement, retourne des données simulées
+        Scraper Indeed: tente un scraping réel; si bloqué, renvoie des échantillons.
         """
         
-        # Données simulées réalistes pour Indeed
+        # 1) Tentative de scraping réel minimaliste (sans JS)
+        try:
+            params = {"q": query, "l": location}
+            resp = self.session.get("https://fr.indeed.com/jobs", params=params, timeout=10)
+            if resp.status_code == 200 and "data-jk" in resp.text:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                cards = soup.select('[data-jk]')[:10]
+                jobs = []
+                scraped_at = datetime.now().isoformat()
+                for card in cards:
+                    title = (card.select_one('h2 a span') or card.select_one('h2 a')).get_text(strip=True) if card.select_one('h2 a') else None
+                    company = (card.select_one('span.companyName a') or card.select_one('span.companyName'))
+                    company = company.get_text(strip=True) if company else None
+                    loc = card.select_one('[data-testid="job-location"]')
+                    loc = loc.get_text(strip=True) if loc else location
+                    rel = card.select_one('h2 a')
+                    url = f"https://fr.indeed.com{rel['href']}" if rel and rel.get('href') else None
+                    desc = card.select_one('[data-testid="job-snippet"]')
+                    description = self.clean_text(desc.get_text(" ", strip=True)) if desc else ""
+                    keywords = self.extract_keywords(description + " " + (title or ""))
+                    if title and company and url:
+                        jobs.append(JobData(
+                            title=title,
+                            company=company,
+                            location=loc,
+                            description=description or f"Offre trouvée pour {query}",
+                            url=url,
+                            salary=None,
+                            keywords=keywords,
+                            source="indeed",
+                            scraped_at=scraped_at
+                        ))
+                if jobs:
+                    return jobs
+        except Exception:
+            pass
+
+        # 2) Repli: données simulées réalistes pour Indeed
         sample_jobs = [
             {
                 "title": f"Développeur {query.title()} Senior",

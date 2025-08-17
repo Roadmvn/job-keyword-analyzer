@@ -14,15 +14,7 @@ const TopKeywords = ({ keywords = [] }) => {
     );
   }
 
-  // Couleurs pour les badges de catégories
-  const categoryColors = {
-    'langage': 'bg-blue-100 text-blue-800',
-    'framework': 'bg-green-100 text-green-800',
-    'outil': 'bg-purple-100 text-purple-800',
-    'méthode': 'bg-orange-100 text-orange-800',
-    'base_donnees': 'bg-red-100 text-red-800',
-    'default': 'bg-gray-100 text-gray-800'
-  };
+  // UI simplifiée grand public: pas de badges techniques
 
   const getMaxFrequency = () => {
     return Math.max(...keywords.map(k => k.frequency || 0));
@@ -46,17 +38,9 @@ const TopKeywords = ({ keywords = [] }) => {
               {index + 1}
             </div>
 
-            {/* Nom du mot-clé */}
+            {/* Nom de la tendance */}
             <div className="flex-1">
-              <p className="font-medium text-gray-900">{keyword.name}</p>
-              {keyword.category && (
-                <span className={`
-                  inline-block px-2 py-1 text-xs rounded-full mt-1
-                  ${categoryColors[keyword.category] || categoryColors.default}
-                `}>
-                  {keyword.category}
-                </span>
-              )}
+              <p className="font-medium text-gray-900">{keyword.name || keyword.keyword}</p>
             </div>
 
             {/* Barre de progression */}

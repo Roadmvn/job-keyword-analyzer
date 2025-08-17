@@ -5,7 +5,7 @@ echo "🛑 Arrêt sécurisé de Job Keywords Analyzer"
 echo "==========================================="
 
 # Variables pour vérifier que nous arrêtons bien nos processus
-PROJECT_PATH="/home/roadmvn/projet1/job-keyword-analyzer"
+PROJECT_PATH="/home/roadmvn/projet/job-keyword-analyzer"
 STOPPED_COUNT=0
 
 # Fonction pour vérifier si un processus appartient à notre projet

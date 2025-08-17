@@ -206,18 +206,9 @@ docker-compose -f docker-compose.test.yml up --abort-on-container-exit
 
 ## 🐳 Gestion Docker
 
-Pour gérer efficacement les conteneurs Docker et résoudre les conflits de ports, consultez notre documentation complète :
+Pour gérer efficacement les services via Docker Compose et connaître les commandes utiles, consultez la documentation centralisée :
 
-📖 **[Guide complet de gestion Docker](docs/docker-management.md)**
-
-### Script d'aide interactif
-```bash
-# Lancer le script d'aide Docker (recommandé)
-./docker-helper
-
-# Ou directement
-./scripts/docker-helper.sh
-```
+📖 **[Index de la documentation](docs/README.md)**
 
 ### Commandes essentielles
 ```bash
@@ -304,7 +295,6 @@ Ce projet est sous licence MIT. Voir le fichier [LICENSE](LICENSE) pour plus de 
 
 - **Issues** : Utilisez GitHub Issues
 - **Documentation** : Consultez le dossier `docs/`
-- **FAQ** : Voir `docs/FAQ.md`
 
 ---
 

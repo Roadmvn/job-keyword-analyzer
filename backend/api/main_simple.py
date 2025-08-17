@@ -3,7 +3,7 @@ Version simplifiée de l'API sans authentification
 Pour test rapide de l'application
 """
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -47,6 +47,21 @@ class JobOffer(BaseModel):
 class SearchRequest(BaseModel):
     query: str
     location: Optional[str] = None
+    
+class Token(BaseModel):
+    access_token: str
+    refresh_token: str
+    expires_in: int = 3600
+
+class SimpleUser(BaseModel):
+    id: int
+    username: str
+    email: Optional[str] = None
+    is_active: bool = True
+
+class LoginResponse(BaseModel):
+    user: SimpleUser
+    tokens: Token
 
 # Données de test
 SAMPLE_JOBS = [
@@ -97,6 +112,43 @@ async def root():
 @app.get("/health")
 async def health_check():
     return {"status": "healthy", "service": "job-analyzer-simple"}
+
+# ===================================
+# AUTH SIMPLIFIÉE (compatibilité frontend)
+# ===================================
+
+import secrets
+
+@app.post("/auth/login", response_model=LoginResponse)
+async def simple_login(username: str = Form(...), password: str = Form(...)):
+    # Version simplifiée: accepte n'importe quel couple user/mot de passe
+    user = SimpleUser(id=1, username=username, email=f"{username}@example.com", is_active=True)
+    tokens = Token(
+        access_token=secrets.token_urlsafe(32),
+        refresh_token=secrets.token_urlsafe(32),
+        expires_in=60 * 60
+    )
+    return LoginResponse(user=user, tokens=tokens)
+
+@app.post("/auth/register", response_model=LoginResponse)
+async def simple_register(username: str = Form(...), email: str = Form(None), password: str = Form(...)):
+    # Version simplifiée: "inscrit" et connecte immédiatement
+    user = SimpleUser(id=1, username=username, email=email or f"{username}@example.com", is_active=True)
+    tokens = Token(
+        access_token=secrets.token_urlsafe(32),
+        refresh_token=secrets.token_urlsafe(32),
+        expires_in=60 * 60
+    )
+    return LoginResponse(user=user, tokens=tokens)
+
+@app.post("/auth/refresh", response_model=Token)
+async def simple_refresh(refresh_token: str = Form(...)):
+    # Regénère un access token simple
+    return Token(
+        access_token=secrets.token_urlsafe(32),
+        refresh_token=refresh_token,
+        expires_in=60 * 60
+    )
 
 
 
@@ -149,7 +201,7 @@ async def get_stats():
 
 @app.get("/api/keywords")
 async def get_top_keywords(limit: int = 10):
-    """Top mots-clés - Format compatible frontend"""
+    """Tendances du marché (format grand public)"""
     all_keywords = []
     
     # Mélanger données statiques et scrapées
@@ -167,14 +219,13 @@ async def get_top_keywords(limit: int = 10):
     # Trier par popularité
     sorted_keywords = sorted(keyword_count.items(), key=lambda x: x[1], reverse=True)
     
-    # Format compatible frontend
+    # Format grand public attendu par le frontend (champ 'name')
     return [
         {
             "id": i + 1,
-            "keyword": k, 
-            "frequency": v,  # Frontend attend 'frequency'
-            "category": "tech"  # Frontend attend 'category'
-        } 
+            "name": k,
+            "frequency": v
+        }
         for i, (k, v) in enumerate(sorted_keywords[:limit])
     ]
 
@@ -222,6 +273,19 @@ async def get_scraped_jobs():
 async def get_scraping_stats():
     """Statistiques de scraping"""
     return scraping_service.get_scraping_stats()
+
+# ===================================
+# EXPORT JSON (sans créer de fichier)
+# ===================================
+
+@app.get("/api/export/jobs")
+async def export_jobs(limit: int = 100, offset: int = 0, source: Optional[str] = None):
+    """Retourne les offres stockées en JSON (API)"""
+    try:
+        jobs = job_db.get_jobs(limit=limit, offset=offset, source=source)
+        return {"count": len(jobs), "items": jobs}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erreur export: {str(e)}")
 
 # ===================================
 # ENDPOINTS BASE DE DONNÉES

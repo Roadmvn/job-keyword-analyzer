@@ -28,8 +28,9 @@ if [ -f .frontend.pid ]; then
     rm -f .frontend.pid
 fi
 
-# Seulement si les PIDs ne marchent pas, utiliser lsof de manière TRÈS ciblée
-PROJECT_PATH="/home/roadmvn/projet1/job-keyword-analyzer"
+# Résoudre les chemins de façon robuste
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_PATH="/home/roadmvn/projet/job-keyword-analyzer"
 
 PORT_3000_PID=$(lsof -ti :3000 2>/dev/null | head -1 || echo "")
 if [ ! -z "$PORT_3000_PID" ]; then
@@ -63,21 +64,40 @@ sleep 2
 echo "✅ Nettoyage sécurisé terminé"
 
 echo "🔧 Démarrage Backend Minimal..."
-cd backend
-source venv/bin/activate
+cd "$SCRIPT_DIR/backend" || exit 1
+# Charger .env si présent (pour DATABASE_URL, etc.)
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    set -a
+    . "$SCRIPT_DIR/.env"
+    set +a
+fi
+# Préparer l'environnement Python minimal
+if [ -d venv ]; then
+    source venv/bin/activate
+else
+    echo "  ⚠️  Environnement Python 'venv' introuvable, création automatique..."
+    python3 -m venv venv
+    source venv/bin/activate
+    pip install -r requirements.txt
+fi
 
 # Variables simples
 export PYTHONPATH="${PWD}:${PYTHONPATH}"
 
 # Lancer API simplifiée
-nohup python api/main_simple.py > ../api-simple.log 2>&1 &
+nohup python api/main_simple.py > "$SCRIPT_DIR/api-simple.log" 2>&1 &
 API_PID=$!
 echo "✅ API Minimale démarrée (PID: $API_PID)"
 
 # Démarrer Frontend
 echo "🎨 Démarrage Frontend..."
-cd ../frontend  
-nohup npm run dev > ../frontend.log 2>&1 &
+cd "$SCRIPT_DIR/frontend"  
+# Installer les dépendances si absentes
+if [ ! -d node_modules ]; then
+    echo "  📦 Installation des dépendances frontend (npm ci)..."
+    npm ci --no-audit --no-fund
+fi
+nohup npm run dev -- --host 0.0.0.0 --port 3000 > "$SCRIPT_DIR/frontend.log" 2>&1 &
 FRONTEND_PID=$!
 echo "✅ Frontend démarré (PID: $FRONTEND_PID)"
 
@@ -98,14 +118,14 @@ echo "  📚 Documentation: http://localhost:8000/docs"
 echo "  🎨 Frontend: http://localhost:3000"
 echo ""
 echo "📋 Logs:"
-echo "  📄 API: tail -f api-simple.log"
-echo "  📄 Frontend: tail -f frontend.log"
+echo "  📄 API: tail -f $SCRIPT_DIR/api-simple.log"
+echo "  📄 Frontend: tail -f $SCRIPT_DIR/frontend.log"
 echo ""
 echo "🛑 Pour arrêter: kill $API_PID $FRONTEND_PID"
 
 # Sauvegarder PIDs
-echo $API_PID > .api-simple.pid
-echo $FRONTEND_PID > .frontend.pid
+echo $API_PID > "$SCRIPT_DIR/.api-simple.pid"
+echo $FRONTEND_PID > "$SCRIPT_DIR/.frontend.pid"
 
 echo ""
 echo "🎉 Version minimale prête ! Testez dans votre navigateur."
